@@ -10,6 +10,7 @@ public class MainGUI extends JFrame {
         super("IA & ML - Assignment 1");
         root.add(menuPanel(), "menu");
         root.add(new ExpertSystemPanel(() -> cards.show(root, "menu")), "expert");
+        root.add(new SearchPanel(() -> cards.show(root, "menu")), "search");
         add(root);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(1100, 700);
@@ -29,7 +30,7 @@ public class MainGUI extends JFrame {
         JButton quit = new JButton("Quit");
 
         expert.addActionListener(e -> cards.show(root, "expert"));
-        search.addActionListener(e -> JOptionPane.showMessageDialog(this, "Search Algorithms module coming next."));
+        search.addActionListener(e -> cards.show(root, "search"));
         quit.addActionListener(e -> System.exit(0));
 
         box.add(title);

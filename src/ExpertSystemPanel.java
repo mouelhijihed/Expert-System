@@ -1,4 +1,5 @@
 import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.util.*;
 import java.util.List;
@@ -29,6 +30,8 @@ public class ExpertSystemPanel extends JPanel {
         tools.add(add);
         tools.add(connect);
         JButton clearBoard = new JButton("Clear board");
+        JButton importBtn = new JButton("Import...");
+        JButton exportBtn = new JButton("Export...");
 
         back.addActionListener(e -> {
             stopPlay();
@@ -42,6 +45,9 @@ public class ExpertSystemPanel extends JPanel {
                 board.clearAll();
             }
         });
+
+        importBtn.addActionListener(e -> importBoard());
+        exportBtn.addActionListener(e -> exportBoard());
 
         ButtonGroup method = new ButtonGroup();
         method.add(forward);
@@ -70,6 +76,9 @@ public class ExpertSystemPanel extends JPanel {
         row1.add(connect);
         row1.add(Box.createHorizontalStrut(14));
         row1.add(clearBoard);
+        row1.add(Box.createHorizontalStrut(14));
+        row1.add(importBtn);
+        row1.add(exportBtn);
 
         JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         row2.add(forward);
@@ -97,6 +106,36 @@ public class ExpertSystemPanel extends JPanel {
 
         resetReasoning();
         updateGoalStatus();
+    }
+
+    private JFileChooser chooser() {
+        JFileChooser fc = new JFileChooser();
+        fc.setFileFilter(new FileNameExtensionFilter("Expert system board (*.txt)", "txt"));
+        return fc;
+    }
+
+    private void exportBoard() {
+        JFileChooser fc = chooser();
+        fc.setSelectedFile(new java.io.File("expert-system.txt"));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        java.io.File f = fc.getSelectedFile();
+        if (!f.getName().contains(".")) f = new java.io.File(f.getPath() + ".txt");
+        if (f.exists() && JOptionPane.showConfirmDialog(this, "Overwrite " + f.getName() + "?", "Export", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+        try {
+            board.save(f.toPath());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Could not export: " + ex.getMessage());
+        }
+    }
+
+    private void importBoard() {
+        JFileChooser fc = chooser();
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            board.load(fc.getSelectedFile().toPath());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Could not import this file: " + ex.getMessage());
+        }
     }
 
     private void updateGoalStatus() {

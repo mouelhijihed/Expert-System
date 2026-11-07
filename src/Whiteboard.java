@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Whiteboard extends JPanel {
 
@@ -29,6 +31,8 @@ public class Whiteboard extends JPanel {
         }
     }
 
+    private static final Pattern IF_THEN = Pattern.compile("(?i)^IF\\s+(.+?)\\s+THEN\\s+(.+)$");
+    private static final Pattern SPLIT = Pattern.compile("(?i)\\s+AND\\s+|\\s*,\\s*");
     private static final int NODE_H = 36, RULE_H = 30;
     private static final Color ORANGE = new Color(0xE65100), PURPLE = new Color(0x6A1B9A);
     private static final Stroke DASH = new BasicStroke(1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{5f, 4f}, 0f);
@@ -177,44 +181,125 @@ public class Whiteboard extends JPanel {
 
     public void save(Path path) throws IOException {
         List<String> lines = new ArrayList<>();
+        List<String> facts = new ArrayList<>();
+        for (N n : nodes) if (!n.rule && n.fact) facts.add(n.label);
+        lines.add("FACTS: " + String.join(", ", facts));
+        String g = goalLabel();
+        if (g != null) lines.add("GOAL: " + g);
         for (N n : nodes) {
-            String flags = "-" + (n.fact ? "F" : "") + (n.goal ? "G" : "") + (n.rule ? "R" : "");
-            lines.add(String.join("|", "NODE", String.valueOf(n.id), flags, String.valueOf(n.x), String.valueOf(n.y), n.label));
+            Rule r = n.rule ? ruleOf(n) : null;
+            if (r != null) lines.add(r.toString());
         }
-        for (E e : edges) lines.add("EDGE|" + e.from.id + "|" + e.to.id);
         Files.write(path, lines);
     }
 
     public void load(Path path) throws IOException {
-        List<N> ns = new ArrayList<>();
-        Map<Integer, N> byId = new HashMap<>();
-        List<E> es = new ArrayList<>();
-        int max = 0;
-        for (String line : Files.readAllLines(path)) {
-            String[] p = line.split("\\|", 6);
-            if (p[0].equals("NODE") && p.length == 6) {
-                N n = new N();
-                n.id = Integer.parseInt(p[1]);
-                n.fact = p[2].contains("F");
-                n.goal = p[2].contains("G");
-                n.rule = p[2].contains("R");
-                n.x = Integer.parseInt(p[3]);
-                n.y = Integer.parseInt(p[4]);
-                n.label = p[5].trim();
-                ns.add(n);
-                byId.put(n.id, n);
-                max = Math.max(max, n.id);
-            } else if (p[0].equals("EDGE") && p.length >= 3) {
-                N a = byId.get(Integer.parseInt(p[1]));
-                N b = byId.get(Integer.parseInt(p[2]));
-                if (a != null && b != null) es.add(new E(a, b));
+        Set<String> facts = new LinkedHashSet<>();
+        String goalName = null;
+        List<List<String>> conds = new ArrayList<>();
+        List<String> concls = new ArrayList<>();
+        int ln = 0;
+        for (String raw : Files.readAllLines(path)) {
+            ln++;
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            String up = line.toUpperCase();
+            if (up.startsWith("FACTS:")) {
+                for (String f : line.substring(6).split(",")) if (!f.trim().isEmpty()) facts.add(f.trim());
+            } else if (up.startsWith("GOAL:")) {
+                goalName = line.substring(5).trim();
+                if (goalName.isEmpty()) throw new IOException("Line " + ln + ": GOAL is empty");
+            } else {
+                String left, right;
+                Matcher im = IF_THEN.matcher(line);
+                if (im.matches()) {
+                    left = im.group(1);
+                    right = im.group(2).trim();
+                } else if (line.contains("->")) {
+                    left = line.substring(0, line.indexOf("->"));
+                    right = line.substring(line.indexOf("->") + 2).trim();
+                } else {
+                    throw new IOException("Line " + ln + " not understood: " + raw.trim());
+                }
+                List<String> c = new ArrayList<>();
+                for (String t : SPLIT.split(left.trim())) if (!t.trim().isEmpty() && !c.contains(t.trim())) c.add(t.trim());
+                if (c.isEmpty() || right.isEmpty()) throw new IOException("Line " + ln + " not understood: " + raw.trim());
+                if (SPLIT.split(right).length > 1) throw new IOException("Line " + ln + ": a rule has only one conclusion");
+                conds.add(c);
+                concls.add(right);
             }
+        }
+        if (facts.isEmpty() && conds.isEmpty()) throw new IOException("No facts or rules found in this file");
+
+        Map<String, Integer> level = new LinkedHashMap<>();
+        for (String f : facts) level.put(f, 0);
+        if (goalName != null) level.put(goalName, 0);
+        for (int i = 0; i < conds.size(); i++) {
+            for (String c : conds.get(i)) level.put(c, 0);
+            level.put(concls.get(i), 0);
+        }
+        int limit = level.size();
+        for (int pass = 0; pass <= limit; pass++) {
+            boolean ch = false;
+            for (int i = 0; i < conds.size(); i++) {
+                int mx = 0;
+                for (String c : conds.get(i)) mx = Math.max(mx, level.get(c));
+                if (mx + 1 <= limit && level.get(concls.get(i)) < mx + 1) {
+                    level.put(concls.get(i), mx + 1);
+                    ch = true;
+                }
+            }
+            if (!ch) break;
+        }
+
+        List<N> ns = new ArrayList<>();
+        List<E> es = new ArrayList<>();
+        Map<String, N> byLabel = new LinkedHashMap<>();
+        Map<N, Integer> col = new HashMap<>();
+        int id = 0;
+        for (String l : level.keySet()) {
+            N n = new N();
+            n.id = ++id;
+            n.label = l;
+            n.fact = facts.contains(l);
+            n.goal = l.equals(goalName);
+            ns.add(n);
+            byLabel.put(l, n);
+            col.put(n, 2 * level.get(l));
+        }
+        for (int i = 0; i < conds.size(); i++) {
+            N r = new N();
+            r.id = ++id;
+            r.label = "R";
+            r.rule = true;
+            int mx = 0;
+            for (String c : conds.get(i)) {
+                mx = Math.max(mx, level.get(c));
+                es.add(new E(byLabel.get(c), r));
+            }
+            es.add(new E(r, byLabel.get(concls.get(i))));
+            ns.add(r);
+            col.put(r, 2 * mx + 1);
+        }
+        int maxCol = 0, maxRows = 1;
+        Map<Integer, Integer> rows = new HashMap<>();
+        for (N n : ns) {
+            maxCol = Math.max(maxCol, col.get(n));
+            maxRows = Math.max(maxRows, rows.merge(col.get(n), 1, Integer::sum));
+        }
+        int xs = maxCol == 0 || getWidth() < 200 ? 130 : Math.max(60, Math.min(130, (getWidth() - 160) / maxCol));
+        int ys = maxRows == 1 || getHeight() < 200 ? 80 : Math.max(50, Math.min(80, (getHeight() - 120) / (maxRows - 1)));
+        Map<Integer, Integer> used = new HashMap<>();
+        for (N n : ns) {
+            int c = col.get(n), k = used.merge(c, 1, Integer::sum) - 1;
+            n.x = 80 + c * xs;
+            n.y = 70 + k * ys;
         }
         nodes.clear();
         nodes.addAll(ns);
         edges.clear();
         edges.addAll(es);
-        nextId = max + 1;
+        nextId = id + 1;
         changed();
     }
 

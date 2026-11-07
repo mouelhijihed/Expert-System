@@ -1,0 +1,7 @@
+# comments start with #
+FACTS: has fever, has cough, tired
+GOAL: needs rest
+IF has fever AND has cough THEN flu
+IF flu AND tired THEN needs rest
+has cough, tired -> cold
+cold -> needs rest
